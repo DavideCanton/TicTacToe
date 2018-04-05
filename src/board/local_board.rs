@@ -55,6 +55,7 @@ mod tests {
     use super::*;
     use board::common::*;
     use board::common::test_utils::*;
+    use board::common::Board;
 
     #[test]
     fn test_create() {
@@ -66,7 +67,7 @@ mod tests {
     #[test]
     fn test_get_set() {
         let mut b = LocalBoard::new();
-        let pos = Position::new(2, 1);
+        let pos = pos!(2, 1);
 
         assert_eq!(b.get_pos(pos), None);
 
@@ -77,6 +78,23 @@ mod tests {
         b.set_pos(pos, None);
 
         assert_eq!(b.get_pos(pos), None);
+    }
+
+    #[test]
+    fn test_load_board_from_str() {
+        let mut b = LocalBoard::new();
+
+        load_board_from_str("XO OXO  O", &mut b);
+
+        assert_eq!(b.get_pos(pos!(0, 0)), Some(Player::X));
+        assert_eq!(b.get_pos(pos!(0, 1)), Some(Player::O));
+        assert_eq!(b.get_pos(pos!(0, 2)), None);
+        assert_eq!(b.get_pos(pos!(1, 0)), Some(Player::O));
+        assert_eq!(b.get_pos(pos!(1, 1)), Some(Player::X));
+        assert_eq!(b.get_pos(pos!(1, 2)), Some(Player::O));
+        assert_eq!(b.get_pos(pos!(2, 0)), None);
+        assert_eq!(b.get_pos(pos!(2, 1)), None);
+        assert_eq!(b.get_pos(pos!(2, 2)), Some(Player::O));
     }
 
     #[test]
@@ -122,16 +140,16 @@ mod tests {
     fn test_moves() {
         let mut board = LocalBoard::new();
 
-        load_board_from_str("         ", &mut board);
+        let mut hs = generate_pos(3, 3);
 
-        assert_positions(&board.get_moves().collect(), &convert_vec(vec![(0, 0), (0, 1), (0, 2), (1, 0), (1, 1), (1, 2), (2, 0), (2, 1), (2, 2)]));
+        assert_positions(&board.get_moves().collect(), &hs);
 
-        board.set_pos(Position::new(1, 1), Some(Player::X));
+        set_and_remove(pos!(1, 1), Some(Player::X), &mut board, &mut hs);
 
-        assert_positions(&board.get_moves().collect(), &convert_vec(vec![(0, 0), (0, 1), (0, 2), (1, 0), (1, 2), (2, 0), (2, 1), (2, 2)]));
+        assert_positions(&board.get_moves().collect(), &hs);
 
-        board.set_pos(Position::new(0, 1), Some(Player::O));
+        set_and_remove(pos!(0, 1), Some(Player::O), &mut board, &mut hs);
 
-        assert_positions(&board.get_moves().collect(), &convert_vec(vec![(0, 0), (0, 2), (1, 0), (1, 2), (2, 0), (2, 1), (2, 2)]));
+        assert_positions(&board.get_moves().collect(), &hs);
     }
 }

@@ -1,5 +1,4 @@
-use std::ops::Sub;
-use std::ops::Div;
+use std::ops::{Add, Sub, Div, Mul};
 
 #[derive(Copy, Clone, Eq, PartialEq, Debug)]
 pub enum Player {
@@ -19,6 +18,17 @@ impl Position {
     }
 }
 
+impl Add<Position> for Position {
+    type Output = Position;
+
+    fn add(self, rhs: Position) -> Self::Output {
+        Position {
+            row: self.row + rhs.row,
+            col: self.col + rhs.col,
+        }
+    }
+}
+
 impl Sub<Position> for Position {
     type Output = Position;
 
@@ -26,6 +36,17 @@ impl Sub<Position> for Position {
         Position {
             row: self.row - rhs.row,
             col: self.col - rhs.col,
+        }
+    }
+}
+
+impl Mul<usize> for Position {
+    type Output = Position;
+
+    fn mul(self, rhs: usize) -> Self::Output {
+        Position {
+            row: self.row * rhs,
+            col: self.col * rhs,
         }
     }
 }
@@ -47,6 +68,11 @@ impl From<(usize, usize)> for Position {
     }
 }
 
+#[macro_export]
+macro_rules! pos {
+    ($i:expr, $j:expr) => { Position::new($i, $j) };
+}
+
 pub trait Board {
     fn winner(&self) -> Option<Player>;
 
@@ -66,10 +92,7 @@ pub(super) fn pos_to_index(pos: &Position) -> usize {
 }
 
 pub(super) fn index_to_pos(index: usize) -> Position {
-    Position {
-        row: index / 3,
-        col: index % 3,
-    }
+    pos!(index / 3, index % 3)
 }
 
 pub(super) fn player_to_sign(player: &Player) -> i8 {
@@ -81,31 +104,27 @@ pub(super) fn player_to_sign(player: &Player) -> i8 {
 
 pub(super) fn sign_to_player(sign: i8) -> Option<Player> {
     match sign {
-        0 => None,
         x if x > 0 => Some(Player::O),
         x if x < 0 => Some(Player::X),
-        _ => panic!()
+        _ => None
     }
 }
 
 pub(super) fn top_left_pos(pos: &Position) -> Position {
-    Position {
-        row: pos.row - pos.row % 3,
-        col: pos.col - pos.col % 3,
-    }
+    pos!(pos.row - pos.row % 3, pos.col - pos.col % 3)
 }
 
 pub(super) fn get_winning_player_at(values: &[i8], indexes: &[usize]) -> Option<Player> {
-    let sum = indexes
+    let sum: i8 = indexes
         .iter()
         .map(|i| values[*i])
         .sum();
 
-    match sum {
-        15 => Some(Player::O),
-        -15 => Some(Player::X),
-        _ => None
-    }
+    let expected: i8 = VALUES.iter().take(3).sum();
+
+    let v = if sum.abs() == expected { sum.signum() } else { 0 };
+
+    sign_to_player(v)
 }
 
 #[cfg(test)]
@@ -114,24 +133,12 @@ pub(super) mod test_utils {
     use std::collections::HashSet;
     use board::local_board::LocalBoard;
 
-    pub(in board) fn convert_vec(v: Vec<(usize, usize)>) -> HashSet<Position> {
-        v.into_iter().map(From::from).collect()
-    }
-
     pub(in board) fn assert_positions(moves: &HashSet<Position>, expected: &HashSet<Position>) {
         assert_eq!(moves, expected);
     }
 
-    pub(in board) fn generate_pos(max_i: usize, max_j: usize) -> Vec<(usize, usize)> {
-        let mut vec = Vec::with_capacity(max_i * max_j);
-
-        for i in 0..max_i {
-            for j in 0..max_j {
-                vec.push((i, j));
-            }
-        }
-
-        vec
+    pub(in board) fn generate_pos(max_i: usize, max_j: usize) -> HashSet<Position> {
+        iproduct!(0..max_i, 0..max_j).map(From::from).collect()
     }
 
     pub(in board) fn load_board_from_str(s: &str, board: &mut LocalBoard) {
@@ -141,6 +148,33 @@ pub(super) mod test_utils {
                 'X' => board.set_pos(pos, Some(Player::X)),
                 'O' => board.set_pos(pos, Some(Player::O)),
                 _ => board.set_pos(pos, None),
+            }
+        }
+    }
+
+    pub(in board) fn set_and_remove<B>(p: Position, pl: Option<Player>, board: &mut B, pos: &mut HashSet<Position>) where B : Board {
+        pos.remove(&p);
+        board.set_pos(p, pl);
+    }
+
+    #[test]
+    fn test_generate_pos() {
+        let v = generate_pos(4, 5);
+
+        for i in 0..4 {
+            for j in 0..5 {
+                assert!(v.contains(&pos!(i, j)));
+            }
+        }
+    }
+
+    #[test]
+    fn test_sign_to_player() {
+        for i in -10..10 {
+            match i {
+                x if x > 0 => assert_eq!(sign_to_player(x), Some(Player::O)),
+                x if x < 0 => assert_eq!(sign_to_player(x), Some(Player::X)),
+                _          => assert_eq!(sign_to_player(i), None),
             }
         }
     }

@@ -40,10 +40,8 @@ impl common::Board for GlobalBoard {
 
         board.set_pos(offset, player);
 
-        let offset_index = common::pos_to_index(&offset);
-
         match board.winner() {
-            None => self.next_board = Some(offset_index),
+            None => self.next_board = Some(index),
             Some(player) => {
                 self.values[index] = common::VALUES[index] * common::player_to_sign(&player);
                 self.next_board = None;
@@ -53,30 +51,28 @@ impl common::Board for GlobalBoard {
 
     fn get_pos(&self, pos: common::Position) -> Option<common::Player> {
         let corner = common::top_left_pos(&pos);
-        let offset = pos - corner;
 
         let board_pos = corner / 3;
         let index = common::pos_to_index(&board_pos);
 
-        let board = &self.boards[index];
         let value = self.values[index];
 
-        match common::sign_to_player(value) {
-            s @ Some(_) => s,
-            None => board.get_pos(offset)
-        }
+        common::sign_to_player(value).or_else(|| {
+            let board = &self.boards[index];
+            let offset = pos - corner;
+            board.get_pos(offset)
+        })
     }
 
     fn get_moves<'a>(&'a self) -> Box<Iterator<Item=common::Position> + 'a> {
         match self.next_board {
-            Some(index) => self.boards[index].get_moves(),
-            None => {
-                Box::new(self.boards
-                    .iter()
-                    .zip(&self.values)
-                    .filter(|&b| common::sign_to_player(*b.1).is_none())
-                    .flat_map(|b| b.0.get_moves()))
-            }
+            Some(index) => normalize_moves(self.boards[index].get_moves(), index),
+            None => Box::new(self.boards
+                                 .iter()
+                                 .zip(&self.values)
+                                 .enumerate()
+                                 .filter(|&(_, (_, &j))| common::sign_to_player(j).is_none())
+                                 .flat_map(|(i, (b, _))| normalize_moves(b.get_moves(), i)))
         }
     }
 
@@ -85,12 +81,17 @@ impl common::Board for GlobalBoard {
     }
 }
 
+fn normalize_moves<'a>(moves: Box<Iterator<Item=common::Position> + 'a>, i: usize) -> Box<Iterator<Item=common::Position> + 'a> {
+    let pos = common::index_to_pos(i) * 3;
+    Box::new(moves.map(move |m| m + pos))
+}
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use board::common::*;
     use board::common::test_utils::*;
+    use std::collections::HashSet;
 
     #[test]
     fn test_create() {
@@ -98,6 +99,11 @@ mod tests {
 
         assert_eq!(b.boards.len(), 9);
         assert_eq!(b.values.len(), 9);
+
+        assert!(b.values.iter().all(|&v| sign_to_player(v).is_none()));
+        assert!(b.boards.iter().all(|b| b.winner().is_none()));
+
+        assert_eq!(b.next_board, None);
     }
 
     #[test]
@@ -121,11 +127,11 @@ mod tests {
         let mut board = GlobalBoard::new();
 
         for i in 0..9 {
-            board.set_pos(Position::new(0, i), Some(Player::X));
+            board.set_pos(pos!(0, i), Some(Player::X));
         }
 
         for i in 0..9 {
-            assert_eq!(board.get_pos(Position::new(0, i)), Some(Player::X));
+            assert_eq!(board.get_pos(pos!(0, i)), Some(Player::X));
         }
 
         assert_eq!(board.values[0], VALUES[0] * player_to_sign(&Player::X));
@@ -144,20 +150,17 @@ mod tests {
         let mut board = GlobalBoard::new();
 
         for i in 0..9 {
-            board.set_pos(Position::new(i, 1), Some(Player::X));
+            board.set_pos(pos!(i, 1), Some(Player::X));
         }
 
         for i in 0..9 {
-            assert_eq!(board.get_pos(Position::new(i, 1)), Some(Player::X));
+            assert_eq!(board.get_pos(pos!(i, 1)), Some(Player::X));
         }
 
-        assert_eq!(board.values[0], VALUES[0] * player_to_sign(&Player::X));
-        assert_eq!(board.values[3], VALUES[3] * player_to_sign(&Player::X));
-        assert_eq!(board.values[6], VALUES[6] * player_to_sign(&Player::X));
-
-        assert_eq!(board.boards[0].winner(), Some(Player::X));
-        assert_eq!(board.boards[3].winner(), Some(Player::X));
-        assert_eq!(board.boards[6].winner(), Some(Player::X));
+        for i in vec![0, 3, 6].into_iter() {
+            assert_eq!(board.values[i], VALUES[i] * player_to_sign(&Player::X));
+            assert_eq!(board.boards[i].winner(), Some(Player::X));
+        }
 
         assert_eq!(board.winner(), Some(Player::X));
     }
@@ -167,11 +170,11 @@ mod tests {
         let mut board = GlobalBoard::new();
 
         for i in 0..9 {
-            board.set_pos(Position::new(i, i), Some(Player::X));
+            board.set_pos(pos!(i, i), Some(Player::X));
         }
 
         for i in 0..9 {
-            assert_eq!(board.get_pos(Position::new(i, i)), Some(Player::X));
+            assert_eq!(board.get_pos(pos!(i, i)), Some(Player::X));
         }
 
         assert_eq!(board.values[0], VALUES[0] * player_to_sign(&Player::X));
@@ -190,11 +193,11 @@ mod tests {
         let mut board = GlobalBoard::new();
 
         for i in 0..9 {
-            board.set_pos(Position::new(i, 8 - i), Some(Player::X));
+            board.set_pos(pos!(i, 8 - i), Some(Player::X));
         }
 
         for i in 0..9 {
-            assert_eq!(board.get_pos(Position::new(i, 8 - i)), Some(Player::X));
+            assert_eq!(board.get_pos(pos!(i, 8 - i)), Some(Player::X));
         }
 
         assert_eq!(board.values[2], VALUES[2] * player_to_sign(&Player::X));
@@ -211,19 +214,53 @@ mod tests {
     #[test]
     fn test_moves() {
         let mut board = GlobalBoard::new();
+        assert_eq!(board.next_board, None);
 
-        let mut pos = convert_vec(generate_pos(9, 9));
-
-        assert_positions(&board.get_moves().collect(), &pos);
-
-        board.set_pos(Position::new(1, 1), Some(Player::X));
-        pos.remove(&Position::new(1, 1));
+        let mut pos = generate_pos(9, 9);
 
         assert_positions(&board.get_moves().collect(), &pos);
 
-        board.set_pos(Position::new(0, 1), Some(Player::O));
-        pos.remove(&Position::new(0, 1));
+        board.set_pos(pos!(1, 1), Some(Player::X));
+        pos = vec![pos!(0,0), pos!(0,1), pos!(0,2),
+                   pos!(1,0), pos!(1,2),
+                   pos!(2,0), pos!(2,1), pos!(2,2)].into_iter().collect();
 
+        assert_eq!(board.next_board, Some(0));
         assert_positions(&board.get_moves().collect(), &pos);
+
+        board.set_pos(pos!(4, 4), Some(Player::O));
+        pos = vec![pos!(3,3), pos!(3,4), pos!(3,5),
+                   pos!(4,3), pos!(4,5),
+                   pos!(5,3), pos!(5,4), pos!(5,5)].into_iter().collect();
+
+        assert_eq!(board.next_board, Some(4));
+        assert_positions(&board.get_moves().collect(), &pos);
+    }
+
+    #[test]
+    fn test_normalize_0() {
+        let i = 0;
+        let moves: HashSet<Position> = vec![pos!(0,0), pos!(1,2), pos!(2,1)].into_iter().collect();
+        let expected: HashSet<Position> = vec![pos!(0,0), pos!(1,2), pos!(2,1)].into_iter().collect();
+
+        assert_positions(&normalize_moves(Box::new(moves.into_iter()), i).collect(), &expected);
+    }
+
+    #[test]
+    fn test_normalize_2() {
+        let i = 2;
+        let moves: HashSet<Position> = vec![pos!(0,0), pos!(1,2), pos!(2,1)].into_iter().collect();
+        let expected: HashSet<Position> = vec![pos!(0,6), pos!(1,8), pos!(2,7)].into_iter().collect();
+
+        assert_positions(&normalize_moves(Box::new(moves.into_iter()), i).collect(), &expected);
+    }
+
+    #[test]
+    fn test_normalize_4() {
+        let i = 4;
+        let moves: HashSet<Position> = vec![pos!(0,0), pos!(1,2), pos!(2,1)].into_iter().collect();
+        let expected: HashSet<Position> = vec![pos!(3,3), pos!(4,5), pos!(5,4)].into_iter().collect();
+
+        assert_positions(&normalize_moves(Box::new(moves.into_iter()), i).collect(), &expected);
     }
 }
